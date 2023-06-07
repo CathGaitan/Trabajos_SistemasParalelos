@@ -5,11 +5,15 @@
 #include <time.h>
 #define COORDINATOR 0
 
-static inline void mult_bloques(double *ablk, double *bblk, double *cblk, int tam_bloque, int N);
+static inline void mult_matrices(double *A, double *B, double *C, int N, int tam_bloque, int stripSize);
+static inline void mult_bloques(double *ablk, double *bblk, double *cblk, int N, int tam_bloque);
 static inline void potencia_D(int *D, double *D2, int stripSize, int N,double *resultados);
 
+
+//variables compartidas
+
 int main(int argc, char* argv[]){
-	int i,j,k,cantProcesos,rank,N,stripSize,tam_bloque,check=1,nivel_provisto, cantThreads;
+	int i,j,k,N,stripSize,tam_bloque,cantProcesos,rank,check=1,nivel_provisto, cantThreads;
     double promedioA, promedioB, RP,maxA,minA,sumaA,maxB,minB,sumaB;
 	double *A,*B,*C,*D2,*CD,*AB,*R,*resultados;
     int *D;
@@ -102,7 +106,7 @@ int main(int argc, char* argv[]){
     //Empieza region paralela 
     #pragma omp parallel shared(A,B,C,D,D2,AB,CD,R) 
     {
-
+        
         //1) Buscar max,min y suma de A y B
         #pragma omp for reduction(+:sumaA) reduction(min:minA) reduction(max:maxA) schedule(static)
         for(i=0;i<stripSize*N;i++){
@@ -144,28 +148,10 @@ int main(int argc, char* argv[]){
         }
 
         //3) AB = A x B
-        #pragma omp for nowait schedule(static)
-        for(i=0;i<stripSize;i+=tam_bloque){
-            int valori=i*N;
-            for(j=0;j<N;j+=tam_bloque){
-                int valorj=j*N;
-                for(k=0;k<N;k+=tam_bloque){
-                    mult_bloques(&A[valori+k], &B[valorj+k], &AB[valori+j],tam_bloque,N);
-                }
-            }  
-        }
+        mult_matrices(A,B,AB,N,tam_bloque,stripSize);
 
         //5) CD = C x D2
-        #pragma omp for nowait schedule(static)
-        for(i=0;i<stripSize;i+=tam_bloque){
-            int valori=i*N;
-            for(j=0;j<N;j+=tam_bloque){
-                int valorj=j*N;
-                for(k=0;k<N;k+=tam_bloque){
-                    mult_bloques(&C[valori+k], &D2[valorj+k], &CD[valori+j],tam_bloque,N);
-                }
-            }  
-        }
+        mult_matrices(C,D2,CD,N,tam_bloque,stripSize);
 
 
         //6) AB = AB * RP
@@ -235,7 +221,21 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
-static inline void mult_bloques(double *ablk, double *bblk, double *cblk, int tam_bloque, int N){
+static inline void mult_matrices(double *A, double *B, double *C, int N, int tam_bloque, int stripSize){
+    int i,j,k;
+    #pragma omp for nowait schedule(static)
+    for(i=0;i<stripSize;i+=tam_bloque){
+        int valori=i*N;
+        for(j=0;j<N;j+=tam_bloque){
+            int valorj=j*N;
+            for(k=0;k<N;k+=tam_bloque){
+                mult_bloques(&A[valori+k], &B[valorj+k], &C[valori+j],N,tam_bloque);
+            }
+        }  
+    }
+}
+
+static inline void mult_bloques(double *ablk, double *bblk, double *cblk, int N, int tam_bloque){
     int i,j,k; 
     for(i=0;i<tam_bloque;i++){
         int valori=i*N;
