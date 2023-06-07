@@ -5,16 +5,20 @@
 #include <time.h>
 #define COORDINATOR 0
 
+static inline void potencia_D(int *D, double *D2, int stripSize, int N,double *resultados);
+static inline void encontrar_valoresA(double *A,int N, int stripSize);
+static inline void encontrar_valoresB(double *B,int N,int stripSize ,int primera, int ultima);
 static inline void mult_matrices(double *A, double *B, double *C, int N, int tam_bloque, int stripSize);
 static inline void mult_bloques(double *ablk, double *bblk, double *cblk, int N, int tam_bloque);
-static inline void potencia_D(int *D, double *D2, int stripSize, int N,double *resultados);
-
+static inline void multiplicacion_ABxRP(double *AB,double RP, int stripSize, int N);
+static inline void sumar_AB_CD(double *AB, double *CD, double *R, int stripSize, int N);
 
 //variables compartidas
+double maxA,minA,sumaA,maxB,minB,sumaB;
 
 int main(int argc, char* argv[]){
 	int i,j,k,N,stripSize,tam_bloque,cantProcesos,rank,check=1,nivel_provisto, cantThreads;
-    double promedioA, promedioB, RP,maxA,minA,sumaA,maxB,minB,sumaB;
+    double promedioA,promedioB,RP;
 	double *A,*B,*C,*D2,*CD,*AB,*R,*resultados;
     int *D;
 	MPI_Status status;
@@ -43,7 +47,6 @@ int main(int argc, char* argv[]){
         D = (int*) malloc(sizeof(int)*N*N);
         R = (double*) malloc(sizeof(double)*N*N);
         resultados = (double*) malloc(sizeof(double)*41);
- 
 	} else {
 		A = (double*) malloc(sizeof(double)*N*stripSize);
 		C = (double*) malloc(sizeof(double)*N*stripSize);
@@ -107,22 +110,8 @@ int main(int argc, char* argv[]){
     #pragma omp parallel shared(A,B,C,D,D2,AB,CD,R) 
     {
         
-        //1) Buscar max,min y suma de A y B
-        #pragma omp for reduction(+:sumaA) reduction(min:minA) reduction(max:maxA) schedule(static)
-        for(i=0;i<stripSize*N;i++){
-            sumaA+=A[i];
-            if(A[i]>maxA) maxA=A[i]; 
-            else if(A[i]<minA) minA=A[i];
-        }
-
-        #pragma omp for reduction(+:sumaB) reduction(min:minB) reduction(max:maxB) schedule(static)
-        for(i=primera;i<ultima;i++){
-            for(j=0;j<N;j++){
-                sumaB+=B[i*N+j];
-                if(B[i*N+j]>maxB) maxB=B[i*N+j]; 
-                else if(B[i*N+j]<minB) minB=B[i*N+j];
-            }
-        }
+        encontrar_valoresA(A,N,stripSize);
+        encontrar_valoresB(B,N,stripSize,primera,ultima);
 
         #pragma omp single
         {
@@ -153,18 +142,11 @@ int main(int argc, char* argv[]){
         //5) CD = C x D2
         mult_matrices(C,D2,CD,N,tam_bloque,stripSize);
 
-
         //6) AB = AB * RP
-        #pragma omp for nowait schedule(static)
-        for (i=0;i<stripSize*N;i++) {
-            AB[i] = AB[i]*RP;
-        }
+        multiplicacion_ABxRP(AB,RP,N,stripSize);
 
         //7) R = AB + CD
-        #pragma omp for nowait schedule(static)
-        for (i=0;i<stripSize*N;i++) {
-            R[i] = AB[i] + CD[i];
-        }
+        sumar_AB_CD(AB,CD,R,N,stripSize);
         
     }
         
@@ -221,6 +203,39 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
+static inline void potencia_D(int *D, double *D2, int stripSize, int N, double *resultados){
+    int i,j;
+    for(i=0;i<N;i++){
+        for(j=0;j<N;j++){
+            int valor = D[j*N+i];
+            double v = resultados[valor];
+            D2[j*N+i] = v;
+        }
+    }
+}
+
+static inline void encontrar_valoresA(double *A, int N, int stripSize){
+    int i;
+    #pragma omp for reduction(+:sumaA) reduction(min:minA) reduction(max:maxA) schedule(static)
+    for(i=0;i<stripSize*N;i++){
+        sumaA+=A[i];
+        if(A[i]>maxA) maxA=A[i]; 
+        else if(A[i]<minA) minA=A[i];
+    }
+}
+
+static inline void encontrar_valoresB(double *B,int N,int stripSize ,int primera, int ultima){
+    int i,j;
+    #pragma omp for reduction(+:sumaB) reduction(min:minB) reduction(max:maxB) schedule(static)
+    for(i=primera;i<ultima;i++){
+        for(j=0;j<N;j++){
+            sumaB+=B[i*N+j];
+            if(B[i*N+j]>maxB) maxB=B[i*N+j]; 
+            else if(B[i*N+j]<minB) minB=B[i*N+j];
+        }
+    }
+}
+
 static inline void mult_matrices(double *A, double *B, double *C, int N, int tam_bloque, int stripSize){
     int i,j,k;
     #pragma omp for nowait schedule(static)
@@ -250,13 +265,18 @@ static inline void mult_bloques(double *ablk, double *bblk, double *cblk, int N,
     }
 }
 
-static inline void potencia_D(int *D, double *D2, int stripSize, int N, double *resultados){
-    int i,j;
-    for(i=0;i<N;i++){
-        for(j=0;j<N;j++){
-            int valor = D[j*N+i];
-            double v = resultados[valor];
-            D2[j*N+i] = v;
-        }
+static inline void multiplicacion_ABxRP(double *AB, double RP, int stripSize, int N){
+    int i;
+    #pragma omp for nowait schedule(static)
+    for (i=0;i<stripSize*N;i++) {
+        AB[i] = AB[i]*RP;
+    }
+}
+
+static inline void sumar_AB_CD(double *AB, double *CD, double *R, int stripSize, int N){
+    int i;
+    #pragma omp for nowait schedule(static)
+    for (i=0;i<stripSize*N;i++) {
+        R[i] = AB[i] + CD[i];
     }
 }
