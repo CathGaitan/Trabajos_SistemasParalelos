@@ -202,7 +202,6 @@ static inline void encontrar_valoresB(double *B, int N, int rank, int cantProces
     int i,j;
     int primera=rank*(N/cantProcesos);
     int ultima=primera+(N/cantProcesos)-1;
-
     for(i=primera;i<=ultima;i++){
         for(j=0;j<N;j++){
             int pos=j*N+i;
