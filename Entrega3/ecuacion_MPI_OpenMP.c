@@ -10,14 +10,14 @@ static inline void encontrar_valoresA(double *A,int N, int stripSize);
 static inline void encontrar_valoresB(double *B,int N,int stripSize ,int primera, int ultima);
 static inline void mult_matrices(double *A, double *B, double *C, int N, int tam_bloque, int stripSize);
 static inline void mult_bloques(double *ablk, double *bblk, double *cblk, int N, int tam_bloque);
-static inline void multiplicacion_ABxRP(double *AB,double RP, int stripSize, int N);
-static inline void sumar_AB_CD(double *AB, double *CD, double *R, int stripSize, int N);
+static inline void multiplicacion_ABxRP(double *AB,double RP, int N, int stripSize);
+static inline void sumar_AB_CD(double *AB, double *CD, double *R, int N, int stripSize);
 
 //variables compartidas
 double maxA,minA,sumaA,maxB,minB,sumaB;
 
 int main(int argc, char* argv[]){
-	int i,j,k,N,stripSize,tam_bloque,cantProcesos,rank,check=1,nivel_provisto, cantThreads;
+	int i,j,k,N,stripSize,tam_bloque,cantProcesos,rank,check=1,nivel_provisto;
     double promedioA,promedioB,RP;
 	double *A,*B,*C,*D2,*CD,*AB,*R,*resultados;
     int *D;
@@ -26,14 +26,12 @@ int main(int argc, char* argv[]){
 
     MPI_Init_thread(&argc,&argv,MPI_THREAD_MULTIPLE,&nivel_provisto);
 
-    if(argc != 4){
-	    printf("Param1: tamanio matriz - Param2: tamanio bloque - Param3: cantidad threads \n");
+    if(argc != 3){
+	    printf("Param1: tamanio matriz - Param2: tamanio bloque \n");
 		exit(1);
 	}
     N=atoi(argv[1]);
 	tam_bloque=atoi(argv[2]);
-    cantThreads=atoi(argv[3]);
-    omp_set_num_threads(cantThreads);
 	MPI_Comm_size(MPI_COMM_WORLD,&cantProcesos);
 	MPI_Comm_rank(MPI_COMM_WORLD,&rank);
 
@@ -126,11 +124,6 @@ int main(int argc, char* argv[]){
 
             commTimes[4] = MPI_Wtime();
 
-            if(rank==COORDINATOR){
-                printf("minA=%f, maxA=%f, sumaA=%f \n",minsR[0],maxsR[0],sumasR[0]);
-                printf("minB=%f, maxB=%f, sumaB=%f \n",minsR[1],maxsR[1],sumasR[1]);
-            }
-
             promedioA=sumasR[0]/(N*N);
             promedioB=sumasR[1]/(N*N);
             RP = ((maxsR[0] * maxsR[1] - minsR[0] * minsR[1]) / (promedioA * promedioB));
@@ -138,6 +131,7 @@ int main(int argc, char* argv[]){
 
         //3) AB = A x B
         mult_matrices(A,B,AB,N,tam_bloque,stripSize);
+
 
         //5) CD = C x D2
         mult_matrices(C,D2,CD,N,tam_bloque,stripSize);
@@ -160,13 +154,6 @@ int main(int argc, char* argv[]){
     MPI_Reduce(commTimes, maxCommTimes, 7, MPI_DOUBLE, MPI_MAX, COORDINATOR, MPI_COMM_WORLD);
 
     if(rank==COORDINATOR){
-        printf("imprimo R \n");
-        for(i=0;i<8;i++){
-            for(j=0;j<8;j++){
-            printf(" [%i][%i]= %0.0f ",i,j,R[i*N+j]);
-        }
-            printf("\n");
-        }
 		for(i=0;i<N;i++){
 			for(j=0;j<N;j++){
 				check=check&&(R[i*N+j]==N);
@@ -265,18 +252,24 @@ static inline void mult_bloques(double *ablk, double *bblk, double *cblk, int N,
     }
 }
 
-static inline void multiplicacion_ABxRP(double *AB, double RP, int stripSize, int N){
-    int i;
+static inline void multiplicacion_ABxRP(double *AB, double RP, int N, int stripSize){
+    int i,j;
     #pragma omp for nowait schedule(static)
-    for (i=0;i<stripSize*N;i++) {
-        AB[i] = AB[i]*RP;
+    for(i=0;i<stripSize;i++){
+        int valori=i*N;
+        for(j=0;j<N;j++){
+            AB[valori+j] = AB[valori+j]*RP;
+        }
     }
 }
 
-static inline void sumar_AB_CD(double *AB, double *CD, double *R, int stripSize, int N){
-    int i;
+static inline void sumar_AB_CD(double *AB, double *CD, double *R, int N, int stripSize){
+    int i,j;
     #pragma omp for nowait schedule(static)
-    for (i=0;i<stripSize*N;i++) {
-        R[i] = AB[i] + CD[i];
+    for(i=0;i<stripSize;i++){
+        int valori=i*N;
+        for(j=0;j<N;j++){
+            R[valori+j] = AB[valori+j] + CD[valori+j];
+        }
     }
 }
